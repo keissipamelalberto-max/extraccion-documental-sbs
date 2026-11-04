@@ -11,7 +11,8 @@ import pytesseract
 import yaml
 from PIL import Image
 
-# P7: importaciones
+from .calidad.puntuar import puntuar
+from .ocr.leer import leer_con_confianza
 from .ocr.preprocesar import aplicar_receta, corregir_inclinacion
 from .ocr.renderizar import pdf_a_imagen
 
@@ -77,5 +78,30 @@ def ejecutar(
         imagen, inclinacion = corregir_inclinacion(imagen)
     imagen = aplicar_receta(imagen, receta)
     resultado = {"archivo": ruta.name, "receta": receta, "inclinacion": inclinacion, "imagen": imagen}
-    # P7: lectura y puntaje
+    lectura = leer_con_confianza(imagen, ocr["lang"], ocr["oem"], ocr["psm"])
+    puntaje = puntuar(lectura["texto"], lectura["confianza"])
+    resultado.update(
+        texto=lectura["texto"],
+        confianza=lectura["confianza"],
+        puntaje=puntaje,
+        decision=enrutar(puntaje, cfg["calidad"]["umbral_score"]),
+    )
     return resultado
+
+
+def enrutar(puntaje: dict[str, Any], umbral: float = 0.8) -> str:
+    """Decide qué pasa con una lectura: ``aceptar``, ``revisar`` o ``rechazar``.
+
+    Args:
+        puntaje: resultado de ``puntuar`` (con ``score`` e ``invalidos``).
+        umbral: puntaje mínimo para aceptar sin revisión.
+
+    Returns:
+        ``aceptar`` si el puntaje llega al umbral y ningún validador falló; ``revisar`` si el puntaje llega
+        a la mitad del umbral; ``rechazar`` en los demás casos.
+    """
+    if puntaje["score"] >= umbral and puntaje["invalidos"] == 0:
+        return "aceptar"
+    if puntaje["score"] >= umbral / 2:
+        return "revisar"
+    return "rechazar"
